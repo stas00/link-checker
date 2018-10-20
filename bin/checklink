@@ -232,6 +232,9 @@ use URI 1.53 qw();               # >= 1.53 for secure()
 use URI::Escape qw();
 use URI::Heuristic qw();
 
+# fastai needs: don't report failed links we have no control over
+my %skip_codes = map { $_ => 1 } qw(405);
+
 # @@@ Needs also W3C::UserAgent but can't use() it here.
 
 use constant RC_ROBOTS_TXT          => -1;
@@ -1312,9 +1315,11 @@ EOF
 
             # Even though it was not broken, we might want to display it
             # on the results page (e.g. because it required authentication)
-            $broken{$u}{location} = 1
-                if ($results{$u}{location}{display} >= 400);
+            # $broken{$u}{location} = 1 if ($results{$u}{location}{display} >= 400);
 
+            # fastai
+            my $code = $results{$u}{location}{display};
+            $broken{$u}{location} = 1 if ($code and $code >= 400 and not $skip_codes{$code});
             # List the broken fragments
             while (my ($fragment, $lines) = each(%{$ulinks->{fragments}})) {
 
@@ -1339,7 +1344,9 @@ EOF
         {
 
             # Couldn't find the document
-            $broken{$u}{location} = 1;
+            # fastai
+            my $code = $results{$u}{location}{code};
+            $broken{$u}{location} = 1 if not $code and $skip_codes{$code};
 
             # All the fragments associated are hence broken
             for my $fragment (keys %{$ulinks->{fragments}}) {
@@ -1347,6 +1354,7 @@ EOF
             }
         }
     }
+
     &hprintf(
         "\nProcessed in %s seconds.\n",
         &time_diff($start, &get_timestamp())
@@ -2558,10 +2566,13 @@ EOF
     return;
 }
 
+
+use Data::Dumper;
 sub show_link_report (\%\%\%\%\@;$\%)
 {
     my ($links, $results, $broken, $redirects, $urls, $codes, $todo) = @_;
-
+#    print(Dumper $links, $results, $broken, $redirects, $urls, $codes, $todo);
+#    return;
     print("\n<dl class=\"report\">") if $Opts{HTML};
     print("\n") if (!$Opts{Quiet});
 
@@ -2586,6 +2597,11 @@ sub show_link_report (\%\%\%\%\@;$\%)
 
         # Error type
         $c = &code_shown($u, $results);
+
+        # fastai: don't print errors that we can't fix (external sites blocking robots, etc., but which work just fine otherwise)
+        #print("\ncode bef $c");
+        return if $c && $skip_codes{$c};
+        #print("\ncode after $c");
 
         # What to do
         my $whattodo;
@@ -2860,7 +2876,8 @@ sub links_summary (\%\%\%\%)
     );
 
     my ($links, $results, $broken, $redirects) = @_;
-
+    #print Dumper $links, $results, $broken, $redirects;
+    #print Dumper $broken;
     # List of the broken links
     my @urls              = keys %{$broken};
     my @dir_redirect_urls = ();
@@ -2883,6 +2900,7 @@ sub links_summary (\%\%\%\%)
             push(@urls, $l);
         }
     }
+    #print Dumper \@urls;
 
     # Broken links and redirects
     if ($#urls < 0) {
